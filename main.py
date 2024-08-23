@@ -6,8 +6,19 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from youtubesearchpython import VideosSearch
 import asyncio
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import RedirectResponse
 
 app = FastAPI()
+
+# Middleware to remove double slashes in URL
+@app.middleware("http")
+async def remove_double_slash_middleware(request, call_next):
+    if "//" in request.url.path:
+        new_url = request.url.path.replace("//", "/")
+        return RedirectResponse(new_url)
+    response = await call_next(request)
+    return response
 
 BASE_URL = "https://www.youtube.com/watch?v="
 REGEX = r"(?:youtube\.com|youtu\.be)"
@@ -216,46 +227,20 @@ class YouTubeAPI:
                 "geo_bypass": True,
                 "nocheckcertificate": True,
                 "quiet": True,
-                "no_warnings": True,
-                "prefer_ffmpeg": True,
-                "merge_output_format": "mp4",
                 "cookiefile": "cookies.txt",
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([link])
             return filepath
 
-        async def song_audio_dl() -> str:
-            filepath = f"downloads/{title}.%(ext)s"
-            ydl_opts = {
-                "format": format_id,
-                "outtmpl": filepath,
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "quiet": True,
-                "no_warnings": True,
-                "prefer_ffmpeg": True,
-                "cookiefile": "cookies.txt",
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "192",
-                    }
-                ],
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([link])
-            return filepath
-
-        if songvideo:
-            return await song_video_dl()
-        elif songaudio:
-            return await song_audio_dl()
+        if songaudio:
+            return await audio_dl()
         elif video:
             return await video_dl()
+        elif songvideo:
+            return await song_video_dl()
         else:
-            return await audio_dl()
+            raise HTTPException(status_code=400, detail="Invalid download option")
 
 yt_api = YouTubeAPI()
 
@@ -293,6 +278,7 @@ async def download(url_request: URLRequest):
         title=url_request.title
     )
     return {"file_path": filepath}
+
 
 # Additional routes can be added here following the same pattern
 
