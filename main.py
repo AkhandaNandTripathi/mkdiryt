@@ -267,6 +267,10 @@ class URLRequest(BaseModel):
     songvideo: Optional[bool] = False
     video: Optional[bool] = False
 
+@app.get("/")
+async def read_root():
+    return {"message": "Web developed by Pragyan"}
+
 @app.post("/fetch")
 async def fetch(url_request: URLRequest):
     url = url_request.url
