@@ -2,21 +2,25 @@ import os
 import re
 import yt_dlp
 from typing import List, Dict, Optional, Union
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from youtubesearchpython import VideosSearch
 import asyncio
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import RedirectResponse
 
 app = FastAPI()
 
-# Middleware to remove double slashes in URL
+# Middleware to remove double slashes in URL without a redirect
 @app.middleware("http")
-async def remove_double_slash_middleware(request, call_next):
-    if "//" in request.url.path:
-        new_url = request.url.path.replace("//", "/")
-        return RedirectResponse(new_url)
+async def remove_double_slash_middleware(request: Request, call_next):
+    # Normalize the URL by replacing double slashes with a single slash
+    normalized_path = re.sub(r'//+', '/', request.url.path)
+
+    # Rebuild the request object with the normalized path
+    if request.url.path != normalized_path:
+        # Create a new request object with the modified path
+        request = Request(scope={**request.scope, "path": normalized_path}, receive=request.receive)
+
+    # Continue with the next middleware/handler
     response = await call_next(request)
     return response
 
@@ -161,86 +165,7 @@ class YouTubeAPI:
         duration_min = result.get("duration", "0:00")
         vidid = result.get("id", "")
         thumbnail = result.get("thumbnails", [{}])[0].get("url", "").split("?")[0]
-        return {
-            "title": title,
-            "duration": duration_min,
-            "thumbnail": thumbnail,
-            "vidid": vidid
-        }
-
-    async def download(
-        self,
-        link: str,
-        video: Optional[bool] = False,
-        songaudio: Optional[bool] = False,
-        songvideo: Optional[bool] = False,
-        format_id: Optional[str] = None,
-        title: Optional[str] = None
-    ) -> str:
-        if "&" in link:
-            link = link.split("&")[0]
-        if "?si=" in link:
-            link = link.split("?si=")[0]
-
-        async def audio_dl() -> str:
-            ydl_opts = {
-                "format": "bestaudio/best",
-                "outtmpl": "downloads/%(id)s.%(ext)s",
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "quiet": True,
-                "no_warnings": True,
-                "cookiefile": "cookies.txt",
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(link, download=False)
-                filepath = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-                if os.path.exists(filepath):
-                    return filepath
-                ydl.download([link])
-                return filepath
-
-        async def video_dl() -> str:
-            ydl_opts = {
-                "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
-                "outtmpl": "downloads/%(id)s.%(ext)s",
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "quiet": True,
-                "no_warnings": True,
-                "cookiefile": "cookies.txt",
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(link, download=False)
-                filepath = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-                if os.path.exists(filepath):
-                    return filepath
-                ydl.download([link])
-                return filepath
-
-        async def song_video_dl() -> str:
-            formats = f"{format_id}+140"
-            filepath = f"downloads/{title}.mp4"
-            ydl_opts = {
-                "format": formats,
-                "outtmpl": filepath,
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "quiet": True,
-                "cookiefile": "cookies.txt",
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([link])
-            return filepath
-
-        if songaudio:
-            return await audio_dl()
-        elif video:
-            return await video_dl()
-        elif songvideo:
-            return await song_video_dl()
-        else:
-            raise HTTPException(status_code=400, detail="Invalid download option")
+        return {"title": title, "duration": duration_min, "vidid": vidid, "thumbnail": thumbnail}
 
 yt_api = YouTubeAPI()
 
